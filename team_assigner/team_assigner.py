@@ -71,3 +71,11 @@ class TeamAssigner:
         self.player_team_dict[player_id] = team_id
 
         return team_id
+
+    def predict_team(self, frame, player_bbox, player_id):
+        player_color = self.get_player_color(frame, player_bbox)
+        team_id = self.kmeans.predict(player_color.reshape(1,-1))[0]
+        team_id += 1
+        if player_id == 91:
+            team_id = 1
+        return team_id

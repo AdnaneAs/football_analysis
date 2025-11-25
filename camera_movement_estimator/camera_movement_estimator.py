@@ -1,6 +1,7 @@
 import pickle
 import cv2
 import numpy as np
+import pandas as pd
 import os
 import sys 
 sys.path.append('../')
@@ -40,11 +41,18 @@ class CameraMovementEstimator():
                     
 
 
+    def smooth_camera_movement(self, camera_movement, window_size=15):
+        df = pd.DataFrame(camera_movement, columns=['x', 'y'])
+        # Use rolling mean
+        df_smoothed = df.rolling(window=window_size, min_periods=1, center=True).mean()
+        return df_smoothed.to_numpy().tolist()
+
     def get_camera_movement(self,frames,read_from_stub=False, stub_path=None):
         # Read the stub 
         if read_from_stub and stub_path is not None and os.path.exists(stub_path):
             with open(stub_path,'rb') as f:
-                return pickle.load(f)
+                camera_movement = pickle.load(f)
+            return self.smooth_camera_movement(camera_movement)
 
         camera_movement = [[0,0]]*len(frames)
 
@@ -77,7 +85,7 @@ class CameraMovementEstimator():
             with open(stub_path,'wb') as f:
                 pickle.dump(camera_movement,f)
 
-        return camera_movement
+        return self.smooth_camera_movement(camera_movement)
     
     def draw_camera_movement(self,frames, camera_movement_per_frame):
         output_frames=[]

@@ -11,8 +11,7 @@ from utils import get_center_of_bbox, get_bbox_width, get_foot_position
 
 class Tracker:
     def __init__(self, model_path):
-        self.model = YOLO(model_path) 
-        self.tracker = sv.ByteTrack()
+        self.model = YOLO(model_path)
 
     def add_position_to_tracks(sekf,tracks):
         for object, object_tracks in tracks.items():
@@ -25,15 +24,67 @@ class Tracker:
                         position = get_foot_position(bbox)
                     tracks[object][frame_num][track_id]['position'] = position
 
-    def interpolate_ball_positions(self,ball_positions):
+    def interpolate_ball_positions(self, ball_positions):
         ball_positions = [x.get(1,{}).get('bbox',[]) for x in ball_positions]
-        df_ball_positions = pd.DataFrame(ball_positions,columns=['x1','y1','x2','y2'])
+        
+        # Initialize Kalman Filter
+        # 4 state variables (x, y, dx, dy), 2 measurement variables (x, y)
+        kf = cv2.KalmanFilter(4, 2)
+        kf.measurementMatrix = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], np.float32)
+        kf.transitionMatrix = np.array([[1, 0, 1, 0], [0, 1, 0, 1], [0, 0, 1, 0], [0, 0, 0, 1]], np.float32)
+        kf.processNoiseCov = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], np.float32) * 0.03
+        
+        interpolated_ball_positions = []
+        
+        for bbox in ball_positions:
+            # Predict next state
+            prediction = kf.predict()
+            
+            if bbox: # Measurement available
+                x1, y1, x2, y2 = bbox
+                center_x = (x1 + x2) / 2
+                center_y = (y1 + y2) / 2
+                measurement = np.array([[np.float32(center_x)], [np.float32(center_y)]])
+                kf.correct(measurement)
+                interpolated_ball_positions.append(bbox)
+            else:
+                # Use prediction
+                center_x = prediction[0][0]
+                center_y = prediction[1][0]
+                
+                # Use last known width/height or default
+                if interpolated_ball_positions and interpolated_ball_positions[-1]:
+                    last_bbox = interpolated_ball_positions[-1]
+                    width = last_bbox[2] - last_bbox[0]
+                    height = last_bbox[3] - last_bbox[1]
+                else:
+                    width = 0
+                    height = 0
+                
+                if width > 0:
+                    x1 = center_x - width / 2
+                    y1 = center_y - height / 2
+                    x2 = center_x + width / 2
+                    y2 = center_y + height / 2
+                    interpolated_ball_positions.append([x1, y1, x2, y2])
+                else:
+                    interpolated_ball_positions.append([])
 
-        # Interpolate missing values
-        df_ball_positions = df_ball_positions.interpolate()
-        df_ball_positions = df_ball_positions.bfill()
+        # Backfill missing values at the start
+        first_valid_bbox = None
+        for bbox in interpolated_ball_positions:
+            if bbox:
+                first_valid_bbox = bbox
+                break
+        
+        if first_valid_bbox:
+            for i in range(len(interpolated_ball_positions)):
+                if not interpolated_ball_positions[i]:
+                    interpolated_ball_positions[i] = first_valid_bbox
+                else:
+                    break
 
-        ball_positions = [{1: {"bbox":x}} for x in df_ball_positions.to_numpy().tolist()]
+        ball_positions = [{1: {"bbox":x}} for x in interpolated_ball_positions]
 
         return ball_positions
 
@@ -52,7 +103,8 @@ class Tracker:
                 tracks = pickle.load(f)
             return tracks
 
-        detections = self.detect_frames(frames)
+        # Use BoT-SORT tracker from Ultralytics
+        results = self.model.track(frames, persist=True, tracker="botsort.yaml")
 
         tracks={
             "players":[],
@@ -60,41 +112,32 @@ class Tracker:
             "ball":[]
         }
 
-        for frame_num, detection in enumerate(detections):
-            cls_names = detection.names
-            cls_names_inv = {v:k for k,v in cls_names.items()}
-
-            # Covert to supervision Detection format
-            detection_supervision = sv.Detections.from_ultralytics(detection)
-
-            # Convert GoalKeeper to player object
-            for object_ind , class_id in enumerate(detection_supervision.class_id):
-                if cls_names[class_id] == "goalkeeper":
-                    detection_supervision.class_id[object_ind] = cls_names_inv["player"]
-
-            # Track Objects
-            detection_with_tracks = self.tracker.update_with_detections(detection_supervision)
+        for frame_num, result in enumerate(results):
+            names = result.names
 
             tracks["players"].append({})
             tracks["referees"].append({})
             tracks["ball"].append({})
 
-            for frame_detection in detection_with_tracks:
-                bbox = frame_detection[0].tolist()
-                cls_id = frame_detection[3]
-                track_id = frame_detection[4]
+            for box in result.boxes:
+                cls_id = int(box.cls[0])
+                class_name = names[cls_id]
+                bbox = box.xyxy[0].tolist()
+                
+                # Track ID might be None if not tracked
+                track_id = int(box.id[0]) if box.id is not None else None
 
-                if cls_id == cls_names_inv['player']:
+                # Handle Goalkeeper as Player
+                if class_name == "goalkeeper":
+                    class_name = "player"
+                
+                if class_name == "player" and track_id is not None:
                     tracks["players"][frame_num][track_id] = {"bbox":bbox}
                 
-                if cls_id == cls_names_inv['referee']:
+                if class_name == "referee" and track_id is not None:
                     tracks["referees"][frame_num][track_id] = {"bbox":bbox}
-            
-            for frame_detection in detection_supervision:
-                bbox = frame_detection[0].tolist()
-                cls_id = frame_detection[3]
-
-                if cls_id == cls_names_inv['ball']:
+                
+                if class_name == "ball":
                     tracks["ball"][frame_num][1] = {"bbox":bbox}
 
         if stub_path is not None:
