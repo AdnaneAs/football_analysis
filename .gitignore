@@ -2,5 +2,6 @@
 *.pyc
 models/
 output_videos/
-training
+training/
+traning2/
 input_videos/

@@ -9,11 +9,13 @@ from player_ball_assigner import PlayerBallAssigner
 from camera_movement_estimator import CameraMovementEstimator
 from view_transformer import ViewTransformer
 from speed_and_distance_estimator import SpeedAndDistance_Estimator
+from tactical_analysis import TacticalAnalysis
+from tqdm import tqdm
 
 
 def main():
     # Read Video
-    video_path = 'input_videos/1124.mp4'
+    video_path = 'input_videos/1126.mp4'
     video_frames = read_video(video_path)
 
     # Create output directory
@@ -58,7 +60,8 @@ def main():
     # Voting mechanism
     player_team_history = {}
     
-    for frame_num, player_track in enumerate(tracks['players']):
+    print("Assigning teams...")
+    for frame_num, player_track in tqdm(enumerate(tracks['players']), total=len(tracks['players'])):
         for player_id, track in player_track.items():
             # Use predict_team to get fresh prediction
             team = team_assigner.predict_team(video_frames[frame_num],   
@@ -85,9 +88,15 @@ def main():
     # Assign Ball Aquisition
     player_assigner =PlayerBallAssigner()
     team_ball_control= []
-    for frame_num, player_track in enumerate(tracks['players']):
+    print("Assigning ball control...")
+    for frame_num, player_track in tqdm(enumerate(tracks['players']), total=len(tracks['players'])):
         ball_bbox = tracks['ball'][frame_num][1]['bbox']
-        assigned_player = player_assigner.assign_ball_to_player(player_track, ball_bbox)
+        
+        # Check if ball_bbox is valid
+        if not ball_bbox:
+            assigned_player = -1
+        else:
+            assigned_player = player_assigner.assign_ball_to_player(player_track, ball_bbox)
 
         if assigned_player != -1:
             tracks['players'][frame_num][assigned_player]['has_ball'] = True
@@ -114,6 +123,26 @@ def main():
 
     ## Draw Speed and Distance
     speed_and_distance_estimator.draw_speed_and_distance(output_video_frames,tracks)
+
+    # Tactical Analysis
+    tactical_analysis = TacticalAnalysis()
+    
+    # 1. Voronoi Video
+    voronoi_frames = tactical_analysis.draw_voronoi(tracks)
+    save_video(voronoi_frames, os.path.join(output_dir, 'voronoi_analysis.avi'))
+    
+    # 2. Heatmap for the player with most movement (or a specific ID)
+    # Find player with most frames tracked
+    player_frame_counts = {}
+    for frame in tracks['players']:
+        for pid in frame.keys():
+            player_frame_counts[pid] = player_frame_counts.get(pid, 0) + 1
+            
+    if player_frame_counts:
+        most_active_player = max(player_frame_counts, key=player_frame_counts.get)
+        heatmap = tactical_analysis.draw_heatmap(tracks, most_active_player)
+        if heatmap is not None:
+            cv2.imwrite(os.path.join(output_dir, f'heatmap_player_{most_active_player}.png'), heatmap)
 
     # Save video
     save_video(output_video_frames, os.path.join(output_dir, 'output_video.avi'))

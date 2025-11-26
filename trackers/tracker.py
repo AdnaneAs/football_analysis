@@ -9,6 +9,8 @@ import sys
 sys.path.append('../')
 from utils import get_center_of_bbox, get_bbox_width, get_foot_position
 
+from tqdm import tqdm
+
 class Tracker:
     def __init__(self, model_path):
         self.model = YOLO(model_path)
@@ -36,7 +38,8 @@ class Tracker:
         
         interpolated_ball_positions = []
         
-        for bbox in ball_positions:
+        print("Interpolating ball positions...")
+        for bbox in tqdm(ball_positions):
             # Predict next state
             prediction = kf.predict()
             
@@ -91,7 +94,7 @@ class Tracker:
     def detect_frames(self, frames):
         batch_size=20 
         detections = [] 
-        for i in range(0,len(frames),batch_size):
+        for i in tqdm(range(0,len(frames),batch_size), desc="Detecting frames"):
             detections_batch = self.model.predict(frames[i:i+batch_size],conf=0.1)
             detections += detections_batch
         return detections
@@ -104,6 +107,9 @@ class Tracker:
             return tracks
 
         # Use BoT-SORT tracker from Ultralytics
+        print("Tracking objects...")
+        # Note: model.track doesn't support tqdm directly on the internal loop easily without callbacks,
+        # but it prints its own progress. We'll just print a start message.
         results = self.model.track(frames, persist=True, tracker="botsort.yaml")
 
         tracks={
@@ -235,7 +241,8 @@ class Tracker:
 
     def draw_annotations(self,video_frames, tracks,team_ball_control):
         output_video_frames= []
-        for frame_num, frame in enumerate(video_frames):
+        print("Drawing annotations...")
+        for frame_num, frame in tqdm(enumerate(video_frames), total=len(video_frames)):
             frame = frame.copy()
 
             player_dict = tracks["players"][frame_num]
@@ -256,7 +263,8 @@ class Tracker:
             
             # Draw ball 
             for track_id, ball in ball_dict.items():
-                frame = self.draw_traingle(frame, ball["bbox"],(0,255,0))
+                if ball["bbox"]: # Check if bbox is not empty
+                    frame = self.draw_traingle(frame, ball["bbox"],(0,255,0))
 
 
             # Draw Team Ball Control
