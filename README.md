@@ -13,6 +13,7 @@ The goal of this project is to detect and track players, referees, and footballs
 - **Kalman Filter Interpolation**: Physics-based ball trajectory prediction for smoother tracking.
 - **Perspective Transformation**: Represents scene depth and perspective.
 - **Speed & Distance**: Calculates player metrics in real-world units.
+- **Tactical Analysis**: Generates Voronoi control maps and player heatmaps to visualize space control and movement density.
 
 ## Modules Used
 The following modules are used in this project:
@@ -22,9 +23,15 @@ The following modules are used in this project:
 - Optical Flow
 - Kalman Filter
 - Perspective Transformation
+- Tactical Analysis (Voronoi & Heatmaps)
 
 ## Requirements
-To run this project, you need to have the following requirements installed:
+To run this project, you need to have the following requirements installed. You can install them using the provided `requirements.txt` file:
+
+```bash
+pip install -r requirements.txt
+```
+
 - Python 3.x
 - ultralytics
 - supervision
@@ -32,3 +39,18 @@ To run this project, you need to have the following requirements installed:
 - NumPy
 - Matplotlib
 - Pandas
+- Scipy
+- Seaborn
+
+## Usage
+1. Place your input video in the `input_videos` folder.
+2. Update the `video_path` in `main.py` if necessary.
+3. Run the main script:
+   ```bash
+   python main.py
+   ```
+4. The results will be saved in the `output_videos` folder, organized by video name and timestamp. Each run produces:
+   - `output_video.avi`: The annotated video with tracking, speed, and distance.
+   - `voronoi_analysis.avi`: A video showing territorial control (Voronoi diagrams).
+   - `heatmap_player_X.png`: A heatmap of the most active player's movement.
+   - Stub files for tracking and camera movement (to speed up subsequent runs).
